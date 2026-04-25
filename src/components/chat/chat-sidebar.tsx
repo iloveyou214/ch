@@ -7,12 +7,14 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
-import { Search, Plus, LogOut, X, MessageCircle } from 'lucide-react';
+import { Search, Plus, LogOut, X, MessageCircle, Wifi, WifiOff } from 'lucide-react';
+import { useSocket } from './socket-provider';
 import { formatTimeAgo } from '@/lib/format';
 import type { ConversationWithDetails, UserPublic } from '@/lib/types';
 
 export function ChatSidebar() {
   const { user, token, logout } = useAuthStore();
+  const { isConnected } = useSocket();
   const {
     conversations,
     activeConversationId,
@@ -115,7 +117,13 @@ export function ChatSidebar() {
       {/* Header */}
       <div className="p-4 border-b border-gray-100">
         <div className="flex items-center justify-between mb-3">
-          <h1 className="text-xl font-bold text-gray-900">ChatFlow</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-bold text-gray-900">ChatFlow</h1>
+            <div className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-full ${isConnected ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-500'}`}>
+              {isConnected ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
+              <span>{isConnected ? 'Live' : 'Connecting...'}</span>
+            </div>
+          </div>
           <div className="flex items-center gap-1">
             <Button
               variant="ghost"

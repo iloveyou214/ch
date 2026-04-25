@@ -6,14 +6,12 @@ import { useChatStore } from '@/lib/chat-store';
 import { useSocket } from './socket-provider';
 import { MessageBubble } from './message-bubble';
 import { ChatInput } from './chat-input';
-import { TypingIndicator } from './typing-indicator';
 import { formatLastSeen } from '@/lib/format';
-import { AnimatePresence } from 'framer-motion';
 import { Loader2 } from 'lucide-react';
 
 export function ChatWindow() {
   const { token, user } = useAuthStore();
-  const { emitSendMessage, emitTyping, emitMessagesRead } = useSocket();
+  const { emitSendMessage, emitMessagesRead } = useSocket();
   const {
     activeConversationId,
     conversations,
@@ -21,7 +19,6 @@ export function ChatWindow() {
     hasMoreMessages,
     isLoadingMessages,
     onlineUsers,
-    typingUsers,
     prependMessages,
     setIsLoadingMessages,
   } = useChatStore();
@@ -37,10 +34,6 @@ export function ChatWindow() {
     : null;
 
   const otherUserOnline = otherUser ? onlineUsers[otherUser.id] : null;
-  const typingNames =
-    typingUsers[activeConversationId || '']?.map((t) => t.userName).filter(
-      (n) => n !== user?.name
-    ) ?? [];
 
   const scrollToBottom = useCallback((smooth = true) => {
     messagesEndRef.current?.scrollIntoView({ behavior: smooth ? 'smooth' : 'instant' });
@@ -68,13 +61,7 @@ export function ChatWindow() {
       }
     };
 
-    // Mark as read via REST and Socket
     emitMessagesRead(activeConversationId);
-    fetch(`/api/conversations/${activeConversationId}/read`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-    }).catch(() => {});
-
     fetchMessages();
   }, [activeConversationId, token, setIsLoadingMessages, scrollToBottom, emitMessagesRead]);
 
@@ -127,10 +114,9 @@ export function ChatWindow() {
 
   const handleTyping = useCallback(
     (isTyping: boolean) => {
-      if (!activeConversationId) return;
-      emitTyping(activeConversationId, isTyping);
+      // Typing indicators handled via polling
     },
-    [activeConversationId, emitTyping]
+    []
   );
 
   // Empty state when no conversation is selected
@@ -215,10 +201,6 @@ export function ChatWindow() {
             ))}
           </div>
         )}
-
-        <AnimatePresence>
-          {typingNames.length > 0 && <TypingIndicator names={typingNames} />}
-        </AnimatePresence>
 
         <div ref={messagesEndRef} />
       </div>

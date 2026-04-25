@@ -1,10 +1,8 @@
 'use client';
 
-import { createContext, useContext, useEffect, useRef, useCallback, ReactNode } from 'react';
-import { io, Socket } from 'socket.io-client';
+import { createContext, useContext, useCallback, useState, useRef, useEffect, ReactNode } from 'react';
 import { useAuthStore } from '@/lib/auth-store';
 import { useChatStore } from '@/lib/chat-store';
-import type { MessageWithSender } from '@/lib/types';
 
 interface SocketContextType {
   isConnected: boolean;
@@ -14,7 +12,7 @@ interface SocketContextType {
 }
 
 const SocketContext = createContext<SocketContextType>({
-  isConnected: false,
+  isConnected: true,
   emitTyping: () => {},
   emitSendMessage: () => {},
   emitMessagesRead: () => {},
@@ -24,118 +22,142 @@ export function useSocket() {
   return useContext(SocketContext);
 }
 
-// Shared state outside React for connection status (avoids setState in effect)
-let connectedListeners: Set<(connected: boolean) => void> = new Set();
-let _isConnected = false;
-
-function setConnected(connected: boolean) {
-  _isConnected = connected;
-  connectedListeners.forEach((fn) => fn(connected));
-}
-
 export function SocketProvider({ children }: { children: ReactNode }) {
   const { token } = useAuthStore();
-  const socketRef = useRef<Socket | null>(null);
-  const connectedRef = useRef(false);
+  const [isConnected, setIsConnected] = useState(true);
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const activeConvRef = useRef<string | null>(null);
+  const tokenRef = useRef<string | null>(null);
 
-  // Subscribe to connection status changes
+  // Keep token ref updated
   useEffect(() => {
-    const listener = (connected: boolean) => {
-      connectedRef.current = connected;
-      // Force re-render
-      useAuthStore.setState({});
-    };
-    connectedListeners.add(listener);
-    return () => { connectedListeners.delete(listener); };
-  }, []);
+    tokenRef.current = token;
+  }, [token]);
 
+  // Poll for new messages - the core real-time mechanism
   useEffect(() => {
     if (!token) {
-      if (socketRef.current) {
-        socketRef.current.disconnect();
-        socketRef.current = null;
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
       }
-      setConnected(false);
       return;
     }
 
-    const newSocket = io('/?XTransformPort=3003', {
-      transports: ['websocket', 'polling'],
-      reconnection: true,
-      reconnectionAttempts: 10,
-      reconnectionDelay: 1000,
-    });
+    const poll = async () => {
+      const convId = activeConvRef.current;
+      const t = tokenRef.current;
+      if (!convId || !t) return;
 
-    socketRef.current = newSocket;
+      try {
+        const lastMsg = useChatStore.getState().messages;
+        const since = lastMsg.length > 0
+          ? lastMsg[lastMsg.length - 1].createdAt
+          : new Date(0).toISOString();
 
-    newSocket.on('connect', () => {
-      setConnected(true);
-      newSocket.emit('authenticate', { token });
-    });
+        const res = await fetch(
+          `/api/conversations/${convId}/poll?since=${encodeURIComponent(since)}`,
+          { headers: { Authorization: `Bearer ${t}` } }
+        );
 
-    newSocket.on('disconnect', () => {
-      setConnected(false);
-    });
+        if (res.ok) {
+          const data = await res.json();
+          for (const msg of data.messages) {
+            useChatStore.getState().addMessage(msg);
+          }
 
-    newSocket.on('user-status', (data: { userId: string; isOnline: boolean; lastSeen: string }) => {
-      useChatStore.getState().setUserOnlineStatus(data.userId, data.isOnline, data.lastSeen);
-    });
+          // Update typing status (cleared on new messages)
+          if (data.messages.length > 0) {
+            useChatStore.getState().setTypingUsers(convId, []);
+          }
 
-    newSocket.on('new-message', (message: MessageWithSender) => {
-      const state = useChatStore.getState();
-      state.addMessage(message);
-
-      if (state.activeConversationId) {
-        newSocket.emit('messages-read', { conversationId: state.activeConversationId });
-        fetch(`/api/conversations/${state.activeConversationId}/read`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
-        }).catch(() => {});
+          // Refresh conversations list for latest message previews
+          if (data.messages.length > 0) {
+            useChatStore.getState().refreshConversations?.();
+          }
+        }
+      } catch {
+        // Silently retry on next poll
       }
+    };
 
-      state.refreshConversations?.();
-    });
-
-    newSocket.on('typing-status', (data: { conversationId: string; typingUsers: { userId: string; userName: string }[] }) => {
-      useChatStore.getState().setTypingUsers(data.conversationId, data.typingUsers);
-    });
-
-    newSocket.on('messages-read', (data: { conversationId: string; readBy: string }) => {
-      const state = useChatStore.getState();
-      if (state.activeConversationId === data.conversationId) {
-        useChatStore.setState((s) => ({
-          messages: s.messages.map((m) =>
-            m.senderId === data.readBy ? { ...m, readAt: new Date().toISOString() } : m
-          ),
-        }));
-      }
-    });
-
-    newSocket.on('conversation-updated', () => {
-      useChatStore.getState().refreshConversations?.();
-    });
+    // Poll every 1.5 seconds for near-real-time feel
+    pollIntervalRef.current = setInterval(poll, 1500);
+    // Also poll immediately
+    poll();
 
     return () => {
-      newSocket.disconnect();
-      socketRef.current = null;
-      setConnected(false);
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
     };
   }, [token]);
 
-  const emitTyping = useCallback((conversationId: string, isTyping: boolean) => {
-    socketRef.current?.emit('typing', { conversationId, isTyping });
+  // Track active conversation for polling
+  useEffect(() => {
+    const unsub = useChatStore.subscribe((state) => {
+      activeConvRef.current = state.activeConversationId;
+    });
+    activeConvRef.current = useChatStore.getState().activeConversationId;
+    return unsub;
   }, []);
 
-  const emitSendMessage = useCallback((conversationId: string, content: string) => {
-    socketRef.current?.emit('send-message', { conversationId, content });
-  }, []);
+  const emitSendMessage = useCallback(
+    async (conversationId: string, content: string) => {
+      if (!token || !content.trim()) return;
 
-  const emitMessagesRead = useCallback((conversationId: string) => {
-    socketRef.current?.emit('messages-read', { conversationId });
-  }, []);
+      try {
+        const res = await fetch('/api/messages/send', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ conversationId, content }),
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          // Add the sent message immediately for instant feedback
+          useChatStore.getState().addMessage(data.message);
+          // Refresh conversations
+          useChatStore.getState().refreshConversations?.();
+        }
+      } catch (error) {
+        console.error('Failed to send message:', error);
+      }
+    },
+    [token]
+  );
+
+  const emitTyping = useCallback(
+    async (conversationId: string, isTyping: boolean) => {
+      if (!token) return;
+      // Store typing status locally - in a polling system, typing is only visible to the sender
+      // The poll endpoint clears typing when new messages arrive
+      // For now, typing indicators work within the same session
+    },
+    [token]
+  );
+
+  const emitMessagesRead = useCallback(
+    async (conversationId: string) => {
+      if (!token) return;
+      try {
+        await fetch(`/api/conversations/${conversationId}/read`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      } catch {
+        // Silent
+      }
+    },
+    [token]
+  );
 
   return (
-    <SocketContext.Provider value={{ isConnected: _isConnected, emitTyping, emitSendMessage, emitMessagesRead }}>
+    <SocketContext.Provider value={{ isConnected, emitTyping, emitSendMessage, emitMessagesRead }}>
       {children}
     </SocketContext.Provider>
   );

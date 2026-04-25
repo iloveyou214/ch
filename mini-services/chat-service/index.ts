@@ -6,7 +6,6 @@ const prisma = new PrismaClient();
 
 const httpServer = createServer();
 const io = new Server(httpServer, {
-  path: '/',
   cors: {
     origin: '*',
     methods: ['GET', 'POST'],
