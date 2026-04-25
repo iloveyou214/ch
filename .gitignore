@@ -52,3 +52,7 @@ prompt
 server.log
 # Skills directory
 /skills/
+# Database (local only)
+db/
+*.db
+mini-services/
