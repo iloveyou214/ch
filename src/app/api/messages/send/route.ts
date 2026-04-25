@@ -38,12 +38,11 @@ export async function POST(req: NextRequest) {
       data: { updatedAt: new Date() },
     });
 
-    // Mark other participant's messages as unread is implicit (lastReadAt stays old)
-
     return NextResponse.json(
       {
         message: {
           ...message,
+          conversationId,
           createdAt: message.createdAt.toISOString(),
           readAt: message.readAt?.toISOString() ?? null,
         },

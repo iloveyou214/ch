@@ -47,3 +47,31 @@ Stage Summary:
 - Typing indicators work between users in real-time
 - Connection status indicator shows "Live" when connected, "Connecting..." when not
 - Chat service properly broadcasts status changes on connect/disconnect
+
+---
+Task ID: 3
+Agent: Main
+Task: Fix WebSocket timeout - sandbox OOM kills separate processes
+
+Work Log:
+- Debugged Socket.io connection timeout error - discovered chat service process keeps dying
+- Tested multiple runtimes (bun, node+tsx) - all processes killed after a few seconds
+- Discovered root cause: sandbox has ~2GB memory limit, Next.js dev server uses 1.5GB
+- Any additional process gets OOM-killed by the kernel
+- Pivoted from WebSocket approach to **heartbeat-based presence** system:
+  - Created `/api/presence` - POST heartbeat (every 10s) + GET status endpoint
+  - Created `/api/presence/offline` - marks user offline on page close
+  - SocketProvider rewritten to use heartbeat polling (10s) + status polling (12s) + message polling (2s)
+  - `beforeunload` event sends `sendBeacon` to mark user offline immediately
+  - Online threshold: user is "online" if heartbeat received within last 30 seconds
+- Reverted message send API to simple DB-only (no relay notification needed)
+- Cleaned up mini-service relay files (no longer needed)
+- All lint checks pass, all APIs tested and working
+
+Stage Summary:
+- Online/offline status works via heartbeat API polling (no separate process needed)
+- Green dot appears next to online users in sidebar and "online" in chat header
+- Users go offline within ~30 seconds of closing the tab (beforeunload beacon for instant)
+- Messages delivered via 2-second polling (near-real-time)
+- Architecture: pure Next.js API routes, no external service dependencies
+- Stable in sandbox environment (no OOM issues)
