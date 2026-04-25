@@ -20,3 +20,30 @@ Stage Summary:
 - Two users (Alice & Bob) pre-registered for testing
 - WebSocket service running on port 3003, Next.js on port 3000
 - Features: authentication, user search, private messaging, typing indicators, read receipts, online status, emoji support, responsive design
+
+---
+Task ID: 2
+Agent: Main
+Task: Fix online/offline status feature - enable real-time WebSocket connection
+
+Work Log:
+- Analyzed current SocketProvider implementation - discovered it was using HTTP polling only, not actual WebSocket connections
+- Found missing `jsonwebtoken` dependency in chat-service mini-service
+- Rewrote SocketProvider to use real Socket.io WebSocket client connection to port 3003
+- Connected to gateway via `/?XTransformPort=3003` pattern (matching the project convention)
+- Implemented proper Socket.io event listeners: user-status, new-message, typing-status, messages-read, conversation-updated
+- Added `online-users-list` event: server sends list of currently online users when a new user authenticates
+- Updated ChatWindow to use Socket.io typing indicators and show TypingIndicator component
+- Used `useReducer` instead of `useState` for connection state to avoid React lint rule violations
+- Kept HTTP polling as fallback (3s interval) for reliability
+- Messages sent via Socket.io `send-message` event (primary) with HTTP API fallback
+- Installed `jsonwebtoken` + `@types/jsonwebtoken` in chat-service
+- Verified both servers running: Next.js on 3000, chat-service on 3003
+- All lint checks pass
+
+Stage Summary:
+- Online/offline status now works via real-time WebSocket (Socket.io) events
+- Users see green dot for online contacts in sidebar and "online" status in chat header
+- Typing indicators work between users in real-time
+- Connection status indicator shows "Live" when connected, "Connecting..." when not
+- Chat service properly broadcasts status changes on connect/disconnect

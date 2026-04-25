@@ -144,6 +144,27 @@ io.on('connection', (socket) => {
       socket.emit('authenticated', { userId: payload.userId, name: user.name });
       broadcastUserStatus(payload.userId, true);
 
+      // Send the list of currently online users to the newly authenticated user
+      const onlineUsersList: { userId: string; isOnline: boolean; lastSeen: string }[] = [];
+      for (const [onlineUserId] of userSocketMap) {
+        if (onlineUserId !== payload.userId) {
+          const onlineUser = await prisma.user.findUnique({
+            where: { id: onlineUserId },
+            select: { lastSeen: true },
+          });
+          if (onlineUser) {
+            onlineUsersList.push({
+              userId: onlineUserId,
+              isOnline: true,
+              lastSeen: onlineUser.lastSeen.toISOString(),
+            });
+          }
+        }
+      }
+      if (onlineUsersList.length > 0) {
+        socket.emit('online-users-list', { users: onlineUsersList });
+      }
+
       console.log(`[Socket] Authenticated: ${user.name} (${socket.id})`);
     } catch (error) {
       socket.emit('auth-error', { message: 'Invalid token' });

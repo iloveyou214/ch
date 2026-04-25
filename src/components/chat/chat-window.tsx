@@ -6,12 +6,13 @@ import { useChatStore } from '@/lib/chat-store';
 import { useSocket } from './socket-provider';
 import { MessageBubble } from './message-bubble';
 import { ChatInput } from './chat-input';
+import { TypingIndicator } from './typing-indicator';
 import { formatLastSeen } from '@/lib/format';
 import { Loader2 } from 'lucide-react';
 
 export function ChatWindow() {
   const { token, user } = useAuthStore();
-  const { emitSendMessage, emitMessagesRead } = useSocket();
+  const { emitSendMessage, emitMessagesRead, emitTyping } = useSocket();
   const {
     activeConversationId,
     conversations,
@@ -19,6 +20,7 @@ export function ChatWindow() {
     hasMoreMessages,
     isLoadingMessages,
     onlineUsers,
+    typingUsers,
     prependMessages,
     setIsLoadingMessages,
   } = useChatStore();
@@ -34,6 +36,10 @@ export function ChatWindow() {
     : null;
 
   const otherUserOnline = otherUser ? onlineUsers[otherUser.id] : null;
+  const currentTypingUsers = activeConversationId ? (typingUsers[activeConversationId] || []) : [];
+  const otherTypingNames = currentTypingUsers
+    .filter((tu) => tu.userId !== user?.id)
+    .map((tu) => tu.userName);
 
   const scrollToBottom = useCallback((smooth = true) => {
     messagesEndRef.current?.scrollIntoView({ behavior: smooth ? 'smooth' : 'instant' });
@@ -114,9 +120,11 @@ export function ChatWindow() {
 
   const handleTyping = useCallback(
     (isTyping: boolean) => {
-      // Typing indicators handled via polling
+      if (activeConversationId) {
+        emitTyping(activeConversationId, isTyping);
+      }
     },
-    []
+    [activeConversationId, emitTyping]
   );
 
   // Empty state when no conversation is selected
@@ -204,6 +212,9 @@ export function ChatWindow() {
 
         <div ref={messagesEndRef} />
       </div>
+
+      {/* Typing Indicator */}
+      {otherTypingNames.length > 0 && <TypingIndicator names={otherTypingNames} />}
 
       {/* Message Input */}
       <ChatInput
